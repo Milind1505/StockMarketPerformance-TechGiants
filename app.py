@@ -44,10 +44,14 @@ def analyze_stocks_streamlit(selected_tickers):
         elif 'Close' in df.columns and len(selected_tickers) == 1: # Handle case where only one ticker is selected and 'Close' is the column name
             close_columns.append('Close')
         
-    # Pivot df to have Ticker as columns with Close prices
-    df_close = df.pivot(index='Date', columns='Ticker', values='Close')
+    # Pivot df to have Ticker as columns with Close prices (pivot_table to fix ValueError)
+    df_close = df.pivot_table(
+        index='Date',
+        columns='Ticker',
+        values='Close',
+        aggfunc='last'  # Aggregate duplicates by taking the last available value
+    ).reset_index()
     df_close.columns.name = None # Remove column name 'Ticker'
-    df_close = df_close.reset_index()
 
     # Melt the close prices dataframe
     df_melted = df_close.melt(id_vars=['Date'], 
@@ -89,7 +93,7 @@ def analyze_stocks_streamlit(selected_tickers):
 
     fig_correlation = None
     if 'AAPL' in selected_tickers and 'MSFT' in selected_tickers:
-        # Extract 'Close_AAPL' and 'Close_MSFT' from df_close, which is already pivoted
+        # Extract 'AAPL' and 'MSFT' from df_close, which is already pivoted
         df_corr = df_close[['Date', 'AAPL', 'MSFT']].dropna()
         if not df_corr.empty:
             fig_correlation = px.scatter(df_corr, x='AAPL', y='MSFT',
