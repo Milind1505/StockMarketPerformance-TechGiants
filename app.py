@@ -38,28 +38,41 @@ def analyze_stocks_streamlit(selected_tickers):
 
     # Make sure 'Date' is a column, and filter available tickers
     if 'Date' not in df_close.columns:
+        # It's possible after pivot/reset_index, 'Date' is still not present because data is empty.
         df_close = df_close.reset_index()
-    available_tickers = [ticker for ticker in selected_tickers if ticker in df_close.columns]
+    df_close_columns = df_close.columns.tolist()
+    available_tickers = [ticker for ticker in selected_tickers if ticker in df_close_columns]
 
-    # Stop if nothing available
-    if 'Date' not in df_close.columns or not available_tickers:
+    # Show columns for debugging on app
+    st.write("df_close columns:", df_close_columns)
+    st.write("Available tickers with actual data:", available_tickers)
+
+    # Stop if nothing available or Date missing
+    if 'Date' not in df_close_columns or not available_tickers:
+        st.error("No valid data for the selected tickers. Try different tickers or check Yahoo Finance availability.")
         return None, None, [], None, None, available_tickers
 
-    # Melt (safe)
-    df_melted = df_close.melt(
-        id_vars=['Date'],
-        value_vars=available_tickers,
-        var_name='Ticker',
-        value_name='Stock_Price'
-    )
+    # Try melting, catch any remaining issues
+    try:
+        df_melted = df_close.melt(
+            id_vars=['Date'],
+            value_vars=available_tickers,
+            var_name='Ticker',
+            value_name='Stock_Price'
+        )
+    except KeyError as e:
+        st.error(f"Data error during melt: {e}. DataFrame columns are: {df_close_columns}")
+        return None, None, [], None, None, available_tickers
 
     if df_melted.empty:
+        st.error("Melted dataframe is empty. No price data to show.")
         return None, None, [], None, None, available_tickers
 
     df_melted['Stock_Price'] = pd.to_numeric(df_melted['Stock_Price'], errors='coerce')
     df_melted.dropna(subset=['Stock_Price'], inplace=True)
 
     if df_melted.empty:
+        st.error("After dropping NaNs, no data left to plot.")
         return None, None, [], None, None, available_tickers
 
     df_melted['MA10'] = df_melted.groupby('Ticker')['Stock_Price'].rolling(window=10).mean().reset_index(level=0, drop=True)
@@ -87,9 +100,12 @@ def analyze_stocks_streamlit(selected_tickers):
 
     fig_correlation = None
     if 'AAPL' in available_tickers and 'MSFT' in available_tickers:
-        df_corr = df_close[['Date', 'AAPL', 'MSFT']].dropna()
-        if not df_corr.empty:
-            fig_correlation = px.scatter(df_corr, x='AAPL', y='MSFT', trendline='ols', title='Stock Price Correlation: Apple vs. Microsoft')
+        try:
+            df_corr = df_close[['Date', 'AAPL', 'MSFT']].dropna()
+            if not df_corr.empty:
+                fig_correlation = px.scatter(df_corr, x='AAPL', y='MSFT', trendline='ols', title='Stock Price Correlation: Apple vs. Microsoft')
+        except Exception as e:
+            st.warning(f"Could not compute correlation: {e}")
 
     return fig_performance, fig_faceted, ma_figs_list, fig_volatility, fig_correlation, available_tickers
 
@@ -122,9 +138,6 @@ else:
     if not available_tickers:
         st.error("No data available for the selected tickers.")
         st.stop()
-
-    # Diagnostic output for debugging (can be removed in final version)
-    st.write("Available tickers with data:", available_tickers)
 
     # Only show plots if real data
     if fig_performance is None or fig_faceted is None:
