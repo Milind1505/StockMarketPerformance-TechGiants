@@ -1,3 +1,11 @@
+import streamlit as st
+import pandas as pd
+import yfinance as yf
+from datetime import datetime
+import plotly.express as px
+
+st.set_page_config(layout="wide", page_title="Stock Market Performance Analysis")
+
 def analyze_stocks_streamlit(selected_tickers):
     start_date = datetime.now() - pd.DateOffset(months=4)
     end_date = datetime.now()
@@ -9,15 +17,15 @@ def analyze_stocks_streamlit(selected_tickers):
             df_list.append(data.assign(Ticker=ticker))
 
     if not df_list:
-        return None, None, [], None, None
+        return None, None, [], None, None, []
 
     df = pd.concat(df_list, axis=0)
     df = df.reset_index()
 
     # Ensure 'Date' column exists and is datetime type
-    if 'Date' in df.columns and df['Date'].dtype != '<M8[ns]':
+    if 'Date' in df.columns and not pd.api.types.is_datetime64_any_dtype(df['Date']):
         df['Date'] = pd.to_datetime(df['Date'])
-    elif 'index' in df.columns and df['index'].dtype == '<M8[ns]':
+    elif 'index' in df.columns and pd.api.types.is_datetime64_any_dtype(df['index']):
         df = df.rename(columns={'index': 'Date'})
         df['Date'] = pd.to_datetime(df['Date'])
 
@@ -28,16 +36,14 @@ def analyze_stocks_streamlit(selected_tickers):
         aggfunc='last'
     ).reset_index()
 
-    # Make sure 'Date' is a column
+    # Make sure 'Date' is a column, and filter available tickers
     if 'Date' not in df_close.columns:
         df_close = df_close.reset_index()
-
-    # Defensive: only use tickers that are *now* columns in df_close (after reset_index)
     available_tickers = [ticker for ticker in selected_tickers if ticker in df_close.columns]
 
-    # Bail gracefully if nothing to plot
+    # Stop if nothing available
     if 'Date' not in df_close.columns or not available_tickers:
-        return None, None, [], None, None
+        return None, None, [], None, None, available_tickers
 
     # Melt (safe)
     df_melted = df_close.melt(
@@ -47,9 +53,14 @@ def analyze_stocks_streamlit(selected_tickers):
         value_name='Stock_Price'
     )
 
-    # (rest of your logic unchanged)
+    if df_melted.empty:
+        return None, None, [], None, None, available_tickers
+
     df_melted['Stock_Price'] = pd.to_numeric(df_melted['Stock_Price'], errors='coerce')
     df_melted.dropna(subset=['Stock_Price'], inplace=True)
+
+    if df_melted.empty:
+        return None, None, [], None, None, available_tickers
 
     df_melted['MA10'] = df_melted.groupby('Ticker')['Stock_Price'].rolling(window=10).mean().reset_index(level=0, drop=True)
     df_melted['MA20'] = df_melted.groupby('Ticker')['Stock_Price'].rolling(window=20).mean().reset_index(level=0, drop=True)
@@ -80,4 +91,61 @@ def analyze_stocks_streamlit(selected_tickers):
         if not df_corr.empty:
             fig_correlation = px.scatter(df_corr, x='AAPL', y='MSFT', trendline='ols', title='Stock Price Correlation: Apple vs. Microsoft')
 
-    return fig_performance, fig_faceted, ma_figs_list, fig_volatility, fig_correlation
+    return fig_performance, fig_faceted, ma_figs_list, fig_volatility, fig_correlation, available_tickers
+
+# ---- Streamlit Layout ----
+st.title("Stock Market Performance Analysis of Tech Giants")
+
+default_tickers = ['AAPL', 'MSFT', 'NFLX', 'AMZN', 'GOOG']
+selected_tickers = st.multiselect(
+    "Select Stocks for Analysis",
+    options=default_tickers,
+    default=default_tickers
+)
+
+if not selected_tickers:
+    st.warning("Please select at least one stock ticker to analyze.")
+    st.stop()
+elif len(selected_tickers) > 5:
+    st.warning("Please select no more than 5 stock tickers for optimal display.")
+    st.stop()
+else:
+    st.info(f"Analyzing: {', '.join(selected_tickers)}")
+
+    # Call analysis
+    results = analyze_stocks_streamlit(selected_tickers)
+    if results is None or all(r is None or r == [] for r in results[:5]):
+        st.error("Could not retrieve any data. Try different tickers or check your connection.")
+        st.stop()
+    fig_performance, fig_faceted, ma_figs_list, fig_volatility, fig_correlation, available_tickers = results
+
+    if not available_tickers:
+        st.error("No data available for the selected tickers.")
+        st.stop()
+
+    # Diagnostic output for debugging (can be removed in final version)
+    st.write("Available tickers with data:", available_tickers)
+
+    # Only show plots if real data
+    if fig_performance is None or fig_faceted is None:
+        st.error("No valid data to plot.")
+        st.stop()
+    else:
+        st.header("1. Overall Stock Market Performance")
+        st.plotly_chart(fig_performance, use_container_width=True)
+
+        st.header("2. Faceted Stock Price Trends")
+        st.plotly_chart(fig_faceted, use_container_width=True)
+
+        st.header("3. Moving Averages for Each Company")
+        for fig_ma in ma_figs_list:
+            st.plotly_chart(fig_ma, use_container_width=True)
+
+        st.header("4. Volatility Analysis Across Companies")
+        st.plotly_chart(fig_volatility, use_container_width=True)
+
+        if fig_correlation:
+            st.header("5. Stock Price Correlation: Apple vs. Microsoft")
+            st.plotly_chart(fig_correlation, use_container_width=True)
+        elif 'AAPL' in selected_tickers or 'MSFT' in selected_tickers:
+            st.info("Select both AAPL and MSFT to view their stock price correlation.")
