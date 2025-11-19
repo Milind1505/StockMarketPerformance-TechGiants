@@ -17,6 +17,7 @@ def analyze_stocks_streamlit(selected_tickers):
             df_list.append(data.assign(Ticker=ticker))
 
     if not df_list:
+        st.error("No data retrieved from Yahoo! Finance. Try fewer tickers or check your internet connection.")
         return None, None, [], None, None, []
 
     df = pd.concat(df_list, axis=0)
@@ -29,6 +30,7 @@ def analyze_stocks_streamlit(selected_tickers):
         df = df.rename(columns={'index': 'Date'})
         df['Date'] = pd.to_datetime(df['Date'])
 
+    # Create pivot table
     df_close = df.pivot_table(
         index='Date',
         columns='Ticker',
@@ -36,23 +38,25 @@ def analyze_stocks_streamlit(selected_tickers):
         aggfunc='last'
     ).reset_index()
 
-    # Make sure 'Date' is a column, and filter available tickers
-    if 'Date' not in df_close.columns:
-        # It's possible after pivot/reset_index, 'Date' is still not present because data is empty.
-        df_close = df_close.reset_index()
-    df_close_columns = df_close.columns.tolist()
-    available_tickers = [ticker for ticker in selected_tickers if ticker in df_close_columns]
+    # Flatten columns if MultiIndex (fix for yfinance)
+    if isinstance(df_close.columns, pd.MultiIndex):
+        df_close.columns = [
+            '_'.join([str(i) for i in tup if i not in [None, '', 'Close']]).strip('_') if any(i for i in tup if i not in [None, '', 'Close']) else 'Date'
+            for tup in df_close.columns.values
+        ]
 
-    # Show columns for debugging on app
+    df_close_columns = df_close.columns.tolist()
     st.write("df_close columns:", df_close_columns)
+
+    # Only keep selected_tickers that are actual columns in df_close
+    available_tickers = [ticker for ticker in selected_tickers if ticker in df_close_columns]
     st.write("Available tickers with actual data:", available_tickers)
 
-    # Stop if nothing available or Date missing
+    # Bail out if nothing to show
     if 'Date' not in df_close_columns or not available_tickers:
         st.error("No valid data for the selected tickers. Try different tickers or check Yahoo Finance availability.")
         return None, None, [], None, None, available_tickers
 
-    # Try melting, catch any remaining issues
     try:
         df_melted = df_close.melt(
             id_vars=['Date'],
@@ -128,7 +132,6 @@ elif len(selected_tickers) > 5:
 else:
     st.info(f"Analyzing: {', '.join(selected_tickers)}")
 
-    # Call analysis
     results = analyze_stocks_streamlit(selected_tickers)
     if results is None or all(r is None or r == [] for r in results[:5]):
         st.error("Could not retrieve any data. Try different tickers or check your connection.")
@@ -139,7 +142,6 @@ else:
         st.error("No data available for the selected tickers.")
         st.stop()
 
-    # Only show plots if real data
     if fig_performance is None or fig_faceted is None:
         st.error("No valid data to plot.")
         st.stop()
