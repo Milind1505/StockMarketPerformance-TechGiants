@@ -11,26 +11,31 @@ def analyze_stocks_streamlit(selected_tickers):
     end_date = datetime.now()
 
     df_list = []
+    status_msgs = []
     for ticker in selected_tickers:
         data = yf.download(ticker, start=start_date, end=end_date, progress=False)
-        if not data.empty:
+        msg = f"{ticker}: {'Downloaded' if (data is not None and not data.empty) else 'NO DATA'}"
+        status_msgs.append(msg)
+        if data is not None and not data.empty:
             df_list.append(data.assign(Ticker=ticker))
 
+    st.write("Download results:", status_msgs)
+
     if not df_list:
-        st.error("No data retrieved from Yahoo! Finance. Try fewer tickers or check your internet connection.")
+        st.error("No data retrieved from Yahoo! Finance. Try fewer tickers, different tickers, or check your internet connection.")
         return None, None, [], None, None, []
 
     df = pd.concat(df_list, axis=0)
     df = df.reset_index()
 
-    # Ensure 'Date' column exists and is datetime type
+    # Ensure 'Date' column exists (pivot_table needs it)
     if 'Date' in df.columns and not pd.api.types.is_datetime64_any_dtype(df['Date']):
         df['Date'] = pd.to_datetime(df['Date'])
     elif 'index' in df.columns and pd.api.types.is_datetime64_any_dtype(df['index']):
         df = df.rename(columns={'index': 'Date'})
         df['Date'] = pd.to_datetime(df['Date'])
 
-    # Create pivot table
+    # Create the pivot table
     df_close = df.pivot_table(
         index='Date',
         columns='Ticker',
@@ -38,21 +43,24 @@ def analyze_stocks_streamlit(selected_tickers):
         aggfunc='last'
     ).reset_index()
 
-    # Flatten columns if MultiIndex (fix for yfinance)
-    if isinstance(df_close.columns, pd.MultiIndex):
-        df_close.columns = [
-            '_'.join([str(i) for i in tup if i not in [None, '', 'Close']]).strip('_') if any(i for i in tup if i not in [None, '', 'Close']) else 'Date'
-            for tup in df_close.columns.values
-        ]
+    # Robust flattening: ensure columns are plain strings (handle single/multi-index cases)
+    flatcols = []
+    for col in df_close.columns.values:
+        if isinstance(col, tuple):
+            # Choose the last non-empty, non-'Close' part
+            last = next((x for x in reversed(col) if x and x != 'Close'), None)
+            flatcols.append(str(last) if last else str(col[0]))
+        else:
+            flatcols.append(str(col))
+    df_close.columns = flatcols
 
     df_close_columns = df_close.columns.tolist()
-    st.write("df_close columns:", df_close_columns)
+    st.write("df_close columns (flattened):", df_close_columns)
 
-    # Only keep selected_tickers that are actual columns in df_close
+    # Only keep tickers that are actual columns in df_close
     available_tickers = [ticker for ticker in selected_tickers if ticker in df_close_columns]
     st.write("Available tickers with actual data:", available_tickers)
 
-    # Bail out if nothing to show
     if 'Date' not in df_close_columns or not available_tickers:
         st.error("No valid data for the selected tickers. Try different tickers or check Yahoo Finance availability.")
         return None, None, [], None, None, available_tickers
