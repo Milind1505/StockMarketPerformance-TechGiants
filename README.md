@@ -34,7 +34,8 @@ Data is sourced live from Yahoo! Finance via the `yfinance` library.
 
 [![Streamlit App Demo Screenshot](https://streamlit.io/images/brand/streamlit-mark-color.png)](https://share.streamlit.io/)
 
-> _(Insert a screenshot or a link to your running app if deployed!)_
+> 
+<img width="1550" height="450" alt="newplot (9)" src="https://github.com/user-attachments/assets/39f2deef-2eed-4bf0-a5cd-c486dd7cf230" />
 
 ---
 
@@ -86,7 +87,8 @@ pip install -r requirements.txt
 
 ## ⚡ Example Output
 
-> _(Paste screenshots here after running locally, or link to Streamlit Cloud deployment if public)_
+> <img width="1550" height="450" alt="newplot (4)" src="https://github.com/user-attachments/assets/6f67645c-63bb-48db-abd2-26f5190b99cb" />
+
 
 ---
 
